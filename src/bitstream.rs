@@ -58,9 +58,9 @@ impl<R: Read> Iterator for BitStream<R> {
         let mut word = if off >= 0 {
             (self.buf[1] as u16) >> off
         } else {
-            (self.buf[1] as u16) << -off | (self.buf[2] as u16) >> 8 + off
+            (self.buf[1] as u16) << -off | (self.buf[2] as u16) >> (8 + off)
         };
-        word |= ((self.buf[0] << self.bit_pos) as u16) << self.word_size - 8;
+        word |= ((self.buf[0] << self.bit_pos) as u16) << (self.word_size - 8);
         self.bit_pos += self.word_size;
         Some(word)
     }
@@ -82,9 +82,9 @@ impl<W: Write> BitStream<W> {
             self.buf[1] = (word << off) as u8;
         } else {
             self.buf[1] = (word >> -off) as u8;
-            self.buf[2] = (word << 8 + off) as u8;
+            self.buf[2] = (word << (8 + off)) as u8;
         }
-        self.buf[0] |= (word >> 8 - off) as u8;
+        self.buf[0] |= (word >> (8 - off)) as u8;
         self.bit_pos += self.word_size;
         match self.bit_pos {
             16 => {
@@ -116,3 +116,95 @@ impl<W: Write> BitStream<W> {
 // 00000000 00000000 00000000
 // --bp--^         - (off = + on left, - on right)
 //       ---ws=9---
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_read_1() {
+        let data: Vec<u8> = (0..=8).collect();
+        let mut stream = BitStream::read_stream(Cursor::new(data), 9).unwrap();
+        assert_eq!(stream.next(), Some(0b000000000));
+        assert_eq!(stream.next(), Some(0b000000100));
+        assert_eq!(stream.next(), Some(0b000010000));
+        assert_eq!(stream.next(), Some(0b000110000));
+        assert_eq!(stream.next(), Some(0b010000000));
+        assert_eq!(stream.next(), Some(0b101000001));
+        assert_eq!(stream.next(), Some(0b100000011));
+        assert_eq!(stream.next(), Some(0b100001000));
+        assert_eq!(stream.next(), None);
+    }
+
+    #[test]
+    fn test_read_2() {
+        let data: Vec<u8> = (0..=8).collect();
+        let mut stream = BitStream::read_stream(Cursor::new(data), 12).unwrap();
+        assert_eq!(stream.next(), Some(0b000000000000));
+        assert_eq!(stream.next(), Some(0b000100000010));
+        assert_eq!(stream.next(), Some(0b000000110000));
+        assert_eq!(stream.next(), Some(0b010000000101));
+        assert_eq!(stream.next(), Some(0b000001100000));
+        assert_eq!(stream.next(), Some(0b011100001000));
+        assert_eq!(stream.next(), None);
+    }
+
+    #[test]
+    fn test_read_3() {
+        let data: Vec<u8> = (0..=8).collect();
+        let mut stream = BitStream::read_stream(Cursor::new(data), 16).unwrap();
+        assert_eq!(stream.next(), Some(0b0000000000000001));
+        assert_eq!(stream.next(), Some(0b0000001000000011));
+        assert_eq!(stream.next(), Some(0b0000010000000101));
+        assert_eq!(stream.next(), Some(0b0000011000000111));
+        assert_eq!(stream.next(), Some(0b0000100000000000));
+        assert_eq!(stream.next(), None);
+    }
+
+    #[test]
+    fn test_write_1() {
+        let mut data = Vec::new();
+        let mut stream = BitStream::write_stream(&mut data, 9).unwrap();
+        stream.write(0b000000000).unwrap();
+        stream.write(0b000000100).unwrap();
+        stream.write(0b000010000).unwrap();
+        stream.write(0b000110000).unwrap();
+        stream.write(0b010000000).unwrap();
+        stream.write(0b101000001).unwrap();
+        stream.write(0b100000011).unwrap();
+        stream.write(0b100001000).unwrap();
+        stream.flush().unwrap();
+        assert_eq!(data, (0..=8).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn test_write_2() {
+        let mut data = Vec::new();
+        let mut stream = BitStream::write_stream(&mut data, 12).unwrap();
+        stream.write(0b000000000000).unwrap();
+        stream.write(0b000100000010).unwrap();
+        stream.write(0b000000110000).unwrap();
+        stream.write(0b010000000101).unwrap();
+        stream.write(0b000001100000).unwrap();
+        stream.write(0b011100001000).unwrap();
+        stream.flush().unwrap();
+        assert_eq!(data, (0..=8).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn test_write_3() {
+        let mut data = Vec::new();
+        let mut stream = BitStream::write_stream(&mut data, 16).unwrap();
+        stream.write(0b0000000000000001).unwrap();
+        stream.write(0b0000001000000011).unwrap();
+        stream.write(0b0000010000000101).unwrap();
+        stream.write(0b0000011000000111).unwrap();
+        stream.write(0b0000100000000000).unwrap();
+        stream.flush().unwrap();
+        assert_eq!(data, (0..=8).chain(0..=0).collect::<Vec<u8>>());
+    }
+}
+
+// 00000000 00000001 00000010 00000011 00000100 00000101 00000110 00000111 00001000
+// 000000000000 000100000010 000000110000 010000000101 000001100000 011100001000
